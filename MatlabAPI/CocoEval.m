@@ -2,26 +2,26 @@ classdef CocoEval < handle
     % Interface for evaluating detection on the Microsoft COCO dataset.
     %
     % The usage for CocoEval is as follows:
-    %  cocoGt=..., cocoDt=...       % load dataset and results
-    %  E = CocoEval(cocoGt,cocoDt); % initialize CocoEval object
+    %  cocoGt=..., cocoDt=...             % load dataset and results
+    %  E = CocoEval(cocoGt,cocoDt);       % initialize CocoEval object
     %  E.params.recThresholds = ...;      % set parameters as desired
-    %  E.evaluate();                % run per image evaluation
-    %  disp( E.evalImgs )           % inspect per image results
-    %  E.accumulate();              % accumulate per image results
-    %  disp( E.eval )               % inspect accumulated results
-    %  E.summarize();               % display summary metrics of results
-    %  E.analyze();                 % plot detailed analysis of errors (slow)
+    %  E.evaluate();                      % run per image evaluation
+    %  disp( E.evalImgs )                 % inspect per image results
+    %  E.accumulate();                    % accumulate per image results
+    %  disp( E.eval )                     % inspect accumulated results
+    %  E.summarize();                     % display summary metrics of results
+    %  E.analyze();                       % plot detailed analysis of errors (slow)
     % For example usage see evalDemo.m and http://mscoco.org/.
     %
     % The evaluation parameters are as follows (defaults in brackets):
-    %  imgIds     - [all] N img ids to use for evaluation
-    %  catIds     - [all] K cat ids to use for evaluation
+    %  imgIds           - [all] N img ids to use for evaluation
+    %  catIds           - [all] K cat ids to use for evaluation
     %  iouThresholds    - [.5:.05:.95] T=10 IoU thresholds for evaluation
     %  recThresholds    - [0:.01:1] R=101 recall thresholds for evaluation
-    %  areaRange    - [...] A=4 object area ranges for evaluation
+    %  areaRange        - [...] A=4 object area ranges for evaluation
     %  maxDetections    - [1 10 100] M=3 thresholds on max detections per image
-    %  iouType    - ['segm'] set iouType to 'segm', 'bbox' or 'keypoints'
-    %  useCats    - [1] if true use category labels for evaluation
+    %  iouType          - ['segm'] set iouType to 'segm', 'bbox' or 'keypoints'
+    %  useCats          - [1] if true use category labels for evaluation
     % Note: iouType replaced the now DEPRECATED useSegm parameter.
     % Note: if useCats=0 category labels are ignored as in proposal scoring.
     % Note: by default areaRange=[0 1e5; 0 32; 32 96; 96 1e5].^2. These A=4
@@ -115,25 +115,27 @@ classdef CocoEval < handle
             parameters.imgIds=unique(parameters.imgIds);
             parameters.catIds=unique(parameters.catIds);
             ev.params=parameters;
-            N=length(parameters.imgIds);
-            K=length(parameters.catIds);
+            numImage=length(parameters.imgIds);
+            numCategory=length(parameters.catIds);
             A=size(parameters.areaRange,1);
-            [nGt,iGt]=getAnnCounts(ev.cocoGt,parameters.imgIds,parameters.catIds,parameters.useCats);
+            [numGt,idxGt]=getAnnCounts(ev.cocoGt,parameters.imgIds,parameters.catIds,parameters.useCats);
             [nDt,iDt]=getAnnCounts(ev.cocoDt,parameters.imgIds,parameters.catIds,parameters.useCats);
-            [ks,is]=ndgrid(1:K,1:N);
-            ev.evalImgs=cell(N,K,A);
-            for i=1:K*N
-                if(nGt(i)==0 && nDt(i)==0)
+            [ks,is]=ndgrid(1:numCategory,1:numImage);
+            ev.evalImgs=cell(numImage,numCategory,A);
+            for i=1:numCategory*numImage
+                if(numGt(i)==0 && nDt(i)==0)
                     continue;
                 end
-                gt=ev.cocoGt.data.annotations(iGt(i):iGt(i)+nGt(i)-1);
+                gt=ev.cocoGt.data.annotations(idxGt(i):idxGt(i)+numGt(i)-1);
                 dt=ev.cocoDt.data.annotations(iDt(i):iDt(i)+nDt(i)-1);
                 if(~isfield(gt,'ignore'))
                     [gt(:).ignore]=deal(0); 
                 end
                 if( strcmp(parameters.iouType,'segm') )
-                    im=ev.cocoGt.loadImgs(parameters.imgIds(is(i))); h=im.height; w=im.width;
-                    for g=1:nGt(i) 
+                    im=ev.cocoGt.loadImgs(parameters.imgIds(is(i))); 
+                    h=im.height; 
+                    w=im.width;
+                    for g=1:numGt(i) 
                         s=gt(g).segmentation; 
                         if(~isstruct(s))
                             gt(g).segmentation=MaskApi.frPoly(s,h,w); 
@@ -162,7 +164,7 @@ classdef CocoEval < handle
                     end
                 elseif( strcmp(parameters.iouType,'keypoints') )
                     gtIg=[gt.ignore]|[gt.num_keypoints]==0;
-                    for g=1:nGt(i)
+                    for g=1:numGt(i)
                         gt(g).ignore=gtIg(g); 
                     end
                 else
@@ -178,9 +180,9 @@ classdef CocoEval < handle
             E=ev.evalImgs; 
             nms={'dtIds','gtIds','dtImgIds','gtImgIds',...
                 'dtMatches','gtMatches','dtScores','dtIgnore','gtIgnore'};
-            ev.evalImgs=repmat(cell2struct(cell(9,1),nms,1),K,A);
-            for i=1:K
-                is=find(nGt(i,:)>0|nDt(i,:)>0);
+            ev.evalImgs=repmat(cell2struct(cell(9,1),nms,1),numCategory,A);
+            for i=1:numCategory
+                is=find(numGt(i,:)>0|nDt(i,:)>0);
                 if(~isempty(is))
                     for j=1:A
                         E0=[E{is,i,j}]; 
@@ -601,13 +603,13 @@ classdef CocoEval < handle
         function e = evaluateImg( gt, dt, params )
             % Run evaluation for a single image and category.
             p=params; 
-            T=length(p.iouThresholds); 
+            numIouThresholds=length(p.iouThresholds); 
             aRange=p.areaRange;
             a=[gt.area]; 
             gtIg=[gt.iscrowd]|[gt.ignore]|a<aRange(1)|a>aRange(2);
-            G=length(gt); 
-            D=length(dt); 
-            for g=1:G
+            numGroundTruth=length(gt); 
+            numDetection=length(dt); 
+            for g=1:numGroundTruth
                 gt(g).ignore=gtIg(g); 
             end
             % sort dt highest score first, sort gt ignore last
@@ -615,9 +617,9 @@ classdef CocoEval < handle
             gt=gt(o);
             [~,o]=sort([dt.score],'descend'); 
             dt=dt(o);
-            if(D>p.maxDetections)
-                D=p.maxDetections; 
-                dt=dt(1:D); 
+            if(numDetection>p.maxDetections)
+                numDetection=p.maxDetections; 
+                dt=dt(1:numDetection); 
             end
             % compute iou between each dt and gt region
             iscrowd = uint8([gt.iscrowd]);
@@ -638,18 +640,18 @@ classdef CocoEval < handle
                 ious=CocoEval.oks(gt,dt); 
             end
             % attempt to match each (sorted) dt to each (sorted) gt
-            gtm=zeros(T,G); 
+            gtm=zeros(numIouThresholds,numGroundTruth); 
             gtIds=[gt.id]; 
             gtIg=[gt.ignore];
-            dtm=zeros(T,D); 
+            dtm=zeros(numIouThresholds,numDetection); 
             dtIds=[dt.id]; 
-            dtIg=zeros(T,D);
-            for t=1:T
-                for d=1:D
+            dtIg=zeros(numIouThresholds,numDetection);
+            for t=1:numIouThresholds
+                for d=1:numDetection
                     % information about best match so far (m=0 -> unmatched)
                     iou=min(p.iouThresholds(t),1-1e-10); 
                     m=0;
-                    for g=1:G
+                    for g=1:numGroundTruth
                         % if this gt already matched, and not a crowd, continue
                         if( gtm(t,g)>0 && ~iscrowd(g) )
                             continue; 
@@ -679,10 +681,10 @@ classdef CocoEval < handle
             else
                 a=[dt.area]; 
             end
-            dtIg = dtIg | (dtm==0 & repmat(a<aRange(1)|a>aRange(2),T,1));
+            dtIg = dtIg | (dtm==0 & repmat(a<aRange(1)|a>aRange(2),numIouThresholds,1));
             % store results for given image and category
-            dtImgIds=ones(1,D)*p.imgIds; 
-            gtImgIds=ones(1,G)*p.imgIds;
+            dtImgIds=ones(1,numDetection)*p.imgIds; 
+            gtImgIds=ones(1,numGroundTruth)*p.imgIds;
             e = {dtIds,gtIds,dtImgIds,gtImgIds,dtm,gtm,[dt.score],dtIg,gtIg};
         end
         
