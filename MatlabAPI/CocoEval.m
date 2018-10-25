@@ -85,10 +85,12 @@ classdef CocoEval < handle
     methods
         function ev = CocoEval( cocoGt, cocoDt, iouType )
             % Initialize CocoEval using coco APIs for gt and dt.
-            if(nargin>0), ev.cocoGt = cocoGt; end
+            if(nargin>0)
+                ev.cocoGt = cocoGt; 
+                ev.params.imgIds = sort(ev.cocoGt.getImgIds());
+                ev.params.catIds = sort(ev.cocoGt.getCatIds());
+            end
             if(nargin>1), ev.cocoDt = cocoDt; end
-            if(nargin>0), ev.params.imgIds = sort(ev.cocoGt.getImgIds()); end
-            if(nargin>0), ev.params.catIds = sort(ev.cocoGt.getCatIds()); end
             if(nargin<3), iouType='segm'; end
             ev.params.iouThresholds = .5:.05:.95;
             ev.params.recThresholds = 0:.01:1;
@@ -107,8 +109,13 @@ classdef CocoEval < handle
         
         function evaluate( ev )
             % Run per image evaluation on given images.
-            fprintf('Running per image evaluation...      '); clk=clock;
-            parameters=ev.params; if(~parameters.useCats), parameters.catIds=1; end; t={'bbox','segm'};
+            fprintf('Running per image evaluation...      '); 
+            clk=clock;
+            parameters=ev.params; 
+            if(~parameters.useCats)
+                parameters.catIds=1; 
+            end
+            t={'bbox','segm'};
             if(isfield(parameters,'useSegm'))
                 parameters.iouType=t{parameters.useSegm+1};
             end
@@ -117,22 +124,22 @@ classdef CocoEval < handle
             ev.params=parameters;
             numImage=length(parameters.imgIds);
             numCategory=length(parameters.catIds);
-            A=size(parameters.areaRange,1);
+            numAreaRange=size(parameters.areaRange,1);
             [numGt,idxGt]=getAnnCounts(ev.cocoGt,parameters.imgIds,parameters.catIds,parameters.useCats);
-            [nDt,iDt]=getAnnCounts(ev.cocoDt,parameters.imgIds,parameters.catIds,parameters.useCats);
-            [ks,is]=ndgrid(1:numCategory,1:numImage);
-            ev.evalImgs=cell(numImage,numCategory,A);
+            [numDt,idxDt]=getAnnCounts(ev.cocoDt,parameters.imgIds,parameters.catIds,parameters.useCats);
+            [category_idx,img_idx]=ndgrid(1:numCategory,1:numImage);
+            ev.evalImgs=cell(numImage,numCategory,numAreaRange);
             for i=1:numCategory*numImage
-                if(numGt(i)==0 && nDt(i)==0)
+                if(numGt(i)==0 && numDt(i)==0)
                     continue;
                 end
                 gt=ev.cocoGt.data.annotations(idxGt(i):idxGt(i)+numGt(i)-1);
-                dt=ev.cocoDt.data.annotations(iDt(i):iDt(i)+nDt(i)-1);
+                dt=ev.cocoDt.data.annotations(idxDt(i):idxDt(i)+numDt(i)-1);
                 if(~isfield(gt,'ignore'))
                     [gt(:).ignore]=deal(0); 
                 end
                 if( strcmp(parameters.iouType,'segm') )
-                    im=ev.cocoGt.loadImgs(parameters.imgIds(is(i))); 
+                    im=ev.cocoGt.loadImgs(parameters.imgIds(img_idx(i))); 
                     h=im.height; 
                     w=im.width;
                     for g=1:numGt(i) 
@@ -147,8 +154,8 @@ classdef CocoEval < handle
                     end
                     if(~isfield(dt,f))
                         s=MaskApi.frBbox(cat(1,dt.bbox),h,w);
-                        for d=1:nDt(i)
-                            dt(d).(f)=s(d); 
+                        for dt_idx=1:numDt(i)
+                            dt(dt_idx).(f)=s(dt_idx); 
                         end
                     end
                 elseif( strcmp(parameters.iouType,'bbox') )
@@ -158,8 +165,8 @@ classdef CocoEval < handle
                     end
                     if(~isfield(dt,f))
                         s=MaskApi.toBbox([dt.segmentation]);
-                        for d=1:nDt(i)
-                            dt(d).(f)=s(d,:); 
+                        for dt_idx=1:numDt(i)
+                            dt(dt_idx).(f)=s(dt_idx,:); 
                         end
                     end
                 elseif( strcmp(parameters.iouType,'keypoints') )
@@ -171,23 +178,24 @@ classdef CocoEval < handle
                     error('unknown iouType: %s',parameters.iouType);
                 end
                 parameters_copy=parameters; 
-                parameters_copy.imgIds=parameters.imgIds(is(i)); 
+                parameters_copy.imgIds=parameters.imgIds(img_idx(i)); 
                 parameters_copy.maxDetections=max(parameters.maxDetections);
-                for j=1:A, parameters_copy.areaRange=parameters.areaRange(j,:);
-                    ev.evalImgs{is(i),ks(i),j}=CocoEval.evaluateImg(gt,dt,parameters_copy); 
+                for areaRange_idx=1:numAreaRange
+                    parameters_copy.areaRange=parameters.areaRange(areaRange_idx,:);
+                    ev.evalImgs{img_idx(i),category_idx(i),areaRange_idx}=CocoEval.evaluateImg(gt,dt,parameters_copy); 
                 end
             end
-            E=ev.evalImgs; 
+            evaluation_results=ev.evalImgs;
             nms={'dtIds','gtIds','dtImgIds','gtImgIds',...
                 'dtMatches','gtMatches','dtScores','dtIgnore','gtIgnore'};
-            ev.evalImgs=repmat(cell2struct(cell(9,1),nms,1),numCategory,A);
-            for i=1:numCategory
-                is=find(numGt(i,:)>0|nDt(i,:)>0);
-                if(~isempty(is))
-                    for j=1:A
-                        E0=[E{is,i,j}]; 
+            ev.evalImgs=repmat(cell2struct(cell(9,1),nms,1),numCategory,numAreaRange);
+            for category_idx=1:numCategory
+                img_idx=find(numGt(category_idx,:)>0|numDt(category_idx,:)>0);
+                if(~isempty(img_idx))
+                    for areaRange_idx=1:numAreaRange
+                        E0=[evaluation_results{img_idx,category_idx,areaRange_idx}]; 
                         for k=1:9
-                            ev.evalImgs(i,j).(nms{k})=[E0{k:9:end}]; 
+                            ev.evalImgs(category_idx,areaRange_idx).(nms{k})=[E0{k:9:end}]; 
                         end
                     end
                 end
@@ -196,20 +204,21 @@ classdef CocoEval < handle
             
             function [ns,is] = getAnnCounts( coco, imgIds, catIds, useCats )
                 % Return ann counts and indices for given imgIds and catIds.
-                as=sort(coco.getCatIds()); 
-                [~,a]=ismember(coco.inds.annCatIds,as);
-                bs=sort(coco.getImgIds()); 
-                [~,b]=ismember(coco.inds.annImgIds,bs);
+                category_ids=sort(coco.getCatIds()); 
+                [~,a]=ismember(coco.inds.annCatIds,category_ids);
+                image_ids=sort(coco.getImgIds()); 
+                [~,b]=ismember(coco.inds.annImgIds,image_ids);
                 if(~useCats)
-                    a(:)=1; as=1; 
+                    a(:)=1; 
+                    category_ids=1; 
                 end
-                ns=zeros(length(as),length(bs));
+                ns=zeros(length(category_ids),length(image_ids));
                 for ind=1:length(a)
                     ns(a(ind),b(ind))=ns(a(ind),b(ind))+1; 
                 end
                 is=reshape(cumsum([0 ns(1:end-1)])+1,size(ns));
-                [~,a]=ismember(catIds,as); 
-                [~,b]=ismember(imgIds,bs);
+                [~,a]=ismember(catIds,category_ids); 
+                [~,b]=ismember(imgIds,image_ids);
                 ns=ns(a,b); 
                 is=is(a,b);
             end
@@ -222,47 +231,48 @@ classdef CocoEval < handle
             if(isempty(ev.evalImgs))
                 error('Please run evaluate() first'); 
             end
-            p=ev.params; 
-            T=length(p.iouThresholds); 
-            R=length(p.recThresholds);
-            K=length(p.catIds); 
-            A=size(p.areaRange,1); 
-            M=length(p.maxDetections);
+            parameters=ev.params; 
+            T=length(parameters.iouThresholds); 
+            R=length(parameters.recThresholds);
+            K=length(parameters.catIds); 
+            A=size(parameters.areaRange,1); 
+            M=length(parameters.maxDetections);
             precision=-ones(T,R,K,A,M); 
             recall=-ones(T,K,A,M);
-            [ks,as,ms]=ndgrid(1:K,1:A,1:M);
+            [category_idx,area_range_idx,max_det_idx]=ndgrid(1:K,1:A,1:M);
             for k=1:K*A*M
-                E=ev.evalImgs(ks(k),as(k)); 
-                is=E.dtImgIds; 
-                mx=p.maxDetections(ms(k));
-                np=nnz(~E.gtIgnore); 
+                E=ev.evalImgs(category_idx(k),area_range_idx(k)); 
+                dt_img_ids=E.dtImgIds; 
+                max_dt=parameters.maxDetections(max_det_idx(k));
+                np=nnz(~E.gtIgnore); % nnz() returns number of nonzero elements
                 if(np==0)
                     continue; 
                 end
-                t=[0 find(diff(is)) length(is)]; 
+                t=[0 find(diff(dt_img_ids)) length(dt_img_ids)]; 
                 t=t(2:end)-t(1:end-1); 
-                is=is<0;
+                dt_img_ids=dt_img_ids<0;
                 r=0; 
                 for i=1:length(t)
-                    is(r+1:r+min(mx,t(i)))=1; r=r+t(i); 
+                    dt_img_ids(r+1:r+min(max_dt,t(i)))=1; 
+                    r=r+t(i); 
                 end
-                dtm=E.dtMatches(:,is); 
-                dtIg=E.dtIgnore(:,is);
-                [~,o]=sort(E.dtScores(is),'descend');
-                tps=reshape( dtm & ~dtIg,T,[]); 
-                tps=tps(:,o);
-                fps=reshape(~dtm & ~dtIg,T,[]); 
-                fps=fps(:,o);
+                dt_matches=E.dtMatches(:,dt_img_ids); 
+                dt_Ignore=E.dtIgnore(:,dt_img_ids);
+                [~,o]=sort(E.dtScores(dt_img_ids),'descend');
+                true_positive=reshape( dt_matches & ~dt_Ignore,T,[]); % ????????????????????????????????????
+                true_positive=true_positive(:,o);
+                false_positive=reshape(~dt_matches & ~dt_Ignore,T,[]); 
+                false_positive=false_positive(:,o);
                 precision(:,:,k)=0; 
                 recall(:,k)=0;
-                for t=1:T
-                    tp=cumsum(tps(t,:)); 
-                    fp=cumsum(fps(t,:)); 
+                for t=1:T % T = length(iouThresholds) = 10; iouThresholds = [.5:.05:.95];
+                    tp=cumsum(true_positive(t,:)); 
+                    fp=cumsum(false_positive(t,:)); 
                     nd=length(tp);
                     rc=tp/np; 
                     pr=tp./(fp+tp); 
-                    q=zeros(1,R); 
-                    thrs=p.recThresholds;
+                    q=zeros(1,R); % R = length(recThresholds) = 101; recThresholds = [0:.01:1]; 
+                    recall_thresholds=parameters.recThresholds;
                     if(nd==0 || tp(nd)==0)
                         continue; 
                     end
@@ -272,12 +282,12 @@ classdef CocoEval < handle
                     end
                     i=1; r=1; s=100;
                     while(r<=R && i<=nd)
-                        if(rc(i)>=thrs(r))
+                        if(rc(i)>=recall_thresholds(r))
                             q(r)=pr(i); 
                             r=r+1; 
                         else
                             i=i+1; 
-                            if(i+s<=nd && rc(i+s)<thrs(r))
+                            if(i+s<=nd && rc(i+s)<recall_thresholds(r))
                                 i=i+s; 
                             end
                         end
@@ -285,7 +295,7 @@ classdef CocoEval < handle
                     precision(t,:,k)=q;
                 end
             end
-            ev.eval=struct('params',p,'date',date,'counts',[T R K A M],...
+            ev.eval=struct('params',parameters,'date',date,'counts',[T R K A M],...
                 'precision',precision,'recall',recall);
             fprintf('DONE (t=%0.2fs).\n',etime(clock,clk));
         end
@@ -602,90 +612,90 @@ classdef CocoEval < handle
     methods( Static )
         function e = evaluateImg( gt, dt, params )
             % Run evaluation for a single image and category.
-            p=params; 
-            numIouThresholds=length(p.iouThresholds); 
-            aRange=p.areaRange;
-            a=[gt.area]; 
-            gtIg=[gt.iscrowd]|[gt.ignore]|a<aRange(1)|a>aRange(2);
+            parameters=params; 
+            numIouThresholds=length(parameters.iouThresholds); 
+            areaRange=parameters.areaRange;
+            area=[gt.area]; 
+            gtIgnore=[gt.iscrowd]|[gt.ignore]|area<areaRange(1)|area>areaRange(2);
             numGroundTruth=length(gt); 
             numDetection=length(dt); 
-            for g=1:numGroundTruth
-                gt(g).ignore=gtIg(g); 
+            for gt_idx=1:numGroundTruth
+                gt(gt_idx).ignore=gtIgnore(gt_idx); 
             end
             % sort dt highest score first, sort gt ignore last
             [~,o]=sort([gt.ignore],'ascend'); 
             gt=gt(o);
             [~,o]=sort([dt.score],'descend'); 
             dt=dt(o);
-            if(numDetection>p.maxDetections)
-                numDetection=p.maxDetections; 
+            if(numDetection>parameters.maxDetections)
+                numDetection=parameters.maxDetections; 
                 dt=dt(1:numDetection); 
             end
             % compute iou between each dt and gt region
             iscrowd = uint8([gt.iscrowd]);
-            t=find(strcmp(p.iouType,{'segm','bbox','keypoints'}));
-            if(t==1)
-                g=[gt.segmentation]; 
-            elseif(t==2)
-                g=cat(1,gt.bbox); 
+            threshold_idx=find(strcmp(parameters.iouType,{'segm','bbox','keypoints'}));
+            if(threshold_idx==1)
+                gt_idx=[gt.segmentation]; 
+            elseif(threshold_idx==2)
+                gt_idx=cat(1,gt.bbox); 
             end
-            if(t==1)
-                d=[dt.segmentation]; 
-            elseif(t==2)
-                d=cat(1,dt.bbox); 
+            if(threshold_idx==1)
+                dt_idx=[dt.segmentation]; 
+            elseif(threshold_idx==2)
+                dt_idx=cat(1,dt.bbox); 
             end
-            if(t<=2)
-                ious=MaskApi.iou(d,g,iscrowd); 
+            if(threshold_idx<=2)
+                ious=MaskApi.iou(dt_idx,gt_idx,iscrowd); 
             else
                 ious=CocoEval.oks(gt,dt); 
             end
             % attempt to match each (sorted) dt to each (sorted) gt
-            gtm=zeros(numIouThresholds,numGroundTruth); 
+            gt_matched=zeros(numIouThresholds,numGroundTruth); 
             gtIds=[gt.id]; 
-            gtIg=[gt.ignore];
-            dtm=zeros(numIouThresholds,numDetection); 
+            gtIgnore=[gt.ignore];
+            dt_matched=zeros(numIouThresholds,numDetection); 
             dtIds=[dt.id]; 
-            dtIg=zeros(numIouThresholds,numDetection);
-            for t=1:numIouThresholds
-                for d=1:numDetection
+            dtIgnore=zeros(numIouThresholds,numDetection);
+            for threshold_idx=1:numIouThresholds
+                for dt_idx=1:numDetection
                     % information about best match so far (m=0 -> unmatched)
-                    iou=min(p.iouThresholds(t),1-1e-10); 
-                    m=0;
-                    for g=1:numGroundTruth
+                    iou=min(parameters.iouThresholds(threshold_idx),1-1e-10); 
+                    matched_gt_idx=0;
+                    for gt_idx=1:numGroundTruth
                         % if this gt already matched, and not a crowd, continue
-                        if( gtm(t,g)>0 && ~iscrowd(g) )
+                        if( gt_matched(threshold_idx,gt_idx)>0 && ~iscrowd(gt_idx) )
                             continue; 
                         end
                         % if dt matched to reg gt, and on ignore gt, stop
-                        if( m>0 && gtIg(m)==0 && gtIg(g)==1 )
+                        if( matched_gt_idx>0 && gtIgnore(matched_gt_idx)==0 && gtIgnore(gt_idx)==1 )
                             break; 
                         end
                         % if match successful and best so far, store appropriately
-                        if( ious(d,g)>=iou )
-                            iou=ious(d,g); 
-                            m=g; 
+                        if( ious(dt_idx,gt_idx)>=iou )
+                            iou=ious(dt_idx,gt_idx); 
+                            matched_gt_idx=gt_idx; 
                         end
                     end
                     % if match made store id of match for both dt and gt
-                    if(~m)
+                    if(~matched_gt_idx)
                         continue; 
                     end
-                    tIg(t,d)=gtIg(m);
-                    dtm(t,d)=gtIds(m); 
-                    gtm(t,m)=dtIds(d);
+                    tIg(threshold_idx,dt_idx)=gtIgnore(matched_gt_idx);
+                    dt_matched(threshold_idx,dt_idx)=gtIds(matched_gt_idx); 
+                    gt_matched(threshold_idx,matched_gt_idx)=dtIds(dt_idx);
                 end
             end
             % set unmatched detections outside of area range to ignore
             if(isempty(dt))
-                a=zeros(1,0); 
+                area=zeros(1,0); 
             else
-                a=[dt.area]; 
+                area=[dt.area]; 
             end
-            dtIg = dtIg | (dtm==0 & repmat(a<aRange(1)|a>aRange(2),numIouThresholds,1));
+            dtIgnore = dtIgnore | (dt_matched==0 & repmat(area<areaRange(1)|area>areaRange(2),numIouThresholds,1));
             % store results for given image and category
-            dtImgIds=ones(1,numDetection)*p.imgIds; 
-            gtImgIds=ones(1,numGroundTruth)*p.imgIds;
-            e = {dtIds,gtIds,dtImgIds,gtImgIds,dtm,gtm,[dt.score],dtIg,gtIg};
+            dtImgIds=ones(1,numDetection)*parameters.imgIds; 
+            gtImgIds=ones(1,numGroundTruth)*parameters.imgIds;
+            e = {dtIds,gtIds,dtImgIds,gtImgIds,dt_matched,gt_matched,[dt.score],dtIgnore,gtIgnore};
         end
         
         function o = oks( gt, dt )
