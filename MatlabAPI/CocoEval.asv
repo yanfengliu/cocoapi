@@ -249,10 +249,7 @@ classdef CocoEval < handle
                 E=ev.evalImgs(category_idx(k),area_range_idx(k)); 
                 dt_img_ids=E.dtImgIds; 
                 max_dt=parameters.maxDetections(max_det_idx(k));
-                % nnz() returns number of nonzero elements, so np = number
-                % of gt not ignored. 
-                np=nnz(~E.gtIgnore); 
-                % if all gt are ignored then move on to the next setting
+                np=nnz(~E.gtIgnore); % nnz() returns number of nonzero elements
                 if(np==0)
                     continue; 
                 end
@@ -271,30 +268,20 @@ classdef CocoEval < handle
                 dt_matches=E.dtMatches(:,dt_img_ids); 
                 dt_Ignore=E.dtIgnore(:,dt_img_ids);
                 % sort detections by confidence score; note that the
-                % sorting is done separately on every column, i.e. the
-                % detections of every image is sorted based on its own
-                % score rankings, from highest to lowest score
+                % sorting is done se
                 [~,o]=sort(E.dtScores(dt_img_ids),'descend');
-                % reshape dt_matches so that it is of size (number of iou
-                % thresholds, number of images)
-                true_positive=reshape( dt_matches & ~dt_Ignore,T,[]);
+                % reshape dt_matches so that it is separated by iou
+                % thresholds
+                true_positive=reshape( dt_matches & ~dt_Ignore,T,[]); % ????????????????????????????????????
                 true_positive=true_positive(:,o);
                 false_positive=reshape(~dt_matches & ~dt_Ignore,T,[]); 
                 false_positive=false_positive(:,o);
-                % note that even though precision is defined to have 5
-                % dimensions, this way we only specifying the first 3.
-                % If k goes over the limit of the 3rd dimension, it will be
-                % modulated on the 3rd and increments the 4th by 1. 
                 precision(:,:,k)=0; 
-                % same dimension logistics for recall (4 dimensions)
                 recall(:,k)=0;
                 for t=1:T % T = length(iouThresholds) = 10; iouThresholds = [.5:.05:.95];
-                    % tp and fp at each score cutoff
                     tp=cumsum(true_positive(t,:)); 
                     fp=cumsum(false_positive(t,:)); 
                     nd=length(tp);
-                    % np = number of gt not ignored. rc = recall array at
-                    % each score cutoff
                     rc=tp/np; 
                     pr=tp./(fp+tp); 
                     q=zeros(1,R); % R = length(recThresholds) = 101; recThresholds = [0:.01:1]; 
@@ -303,12 +290,10 @@ classdef CocoEval < handle
                         continue; 
                     end
                     recall(t,k)=rc(end);
-                    % make precision-recall curve monotonically decreasing
                     for i=nd-1:-1:1
                         pr(i)=max(pr(i+1),pr(i)); 
                     end
                     i=1; r=1; s=100;
-                    % interpolate precision at 101 recall thresholds
                     while(r<=R && i<=nd)
                         if(rc(i)>=recall_thresholds(r))
                             q(r)=pr(i); 
