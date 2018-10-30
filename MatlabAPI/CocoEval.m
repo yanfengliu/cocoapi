@@ -249,11 +249,11 @@ classdef CocoEval < handle
                 E=ev.evalImgs(category_idx(k),area_range_idx(k)); 
                 dt_img_ids=E.dtImgIds; 
                 max_dt=parameters.maxDetections(max_det_idx(k));
-                % nnz() returns number of nonzero elements, so np = number
-                % of gt not ignored. 
-                np=nnz(~E.gtIgnore); 
+                % nnz() returns number of nonzero elements, so 
+                % np = number of gt not ignored. 
+                gt_not_ignored=nnz(~E.gtIgnore); 
                 % if all gt are ignored then move on to the next setting
-                if(np==0)
+                if(gt_not_ignored==0)
                     continue; 
                 end
                 t=[0 find(diff(dt_img_ids)) length(dt_img_ids)]; 
@@ -292,30 +292,30 @@ classdef CocoEval < handle
                     % tp and fp at each score cutoff
                     tp=cumsum(true_positive(t,:)); 
                     fp=cumsum(false_positive(t,:)); 
-                    nd=length(tp);
+                    num_tp=length(tp);
                     % np = number of gt not ignored. rc = recall array at
                     % each score cutoff
-                    rc=tp/np; 
+                    rc=tp/gt_not_ignored; 
                     pr=tp./(fp+tp); 
                     q=zeros(1,R); % R = length(recThresholds) = 101; recThresholds = [0:.01:1]; 
                     recall_thresholds=parameters.recThresholds;
-                    if(nd==0 || tp(nd)==0)
+                    if(num_tp==0 || tp(num_tp)==0)
                         continue; 
                     end
                     recall(t,k)=rc(end);
                     % make precision-recall curve monotonically decreasing
-                    for i=nd-1:-1:1
+                    for i=num_tp-1:-1:1
                         pr(i)=max(pr(i+1),pr(i)); 
                     end
                     i=1; r=1; s=100;
                     % interpolate precision at 101 recall thresholds
-                    while(r<=R && i<=nd)
+                    while(r<=R && i<=num_tp)
                         if(rc(i)>=recall_thresholds(r))
                             q(r)=pr(i); 
                             r=r+1; 
                         else
                             i=i+1; 
-                            if(i+s<=nd && rc(i+s)<recall_thresholds(r))
+                            if(i+s<=num_tp && rc(i+s)<recall_thresholds(r))
                                 i=i+s; 
                             end
                         end
