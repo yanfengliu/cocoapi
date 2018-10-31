@@ -294,9 +294,9 @@ classdef CocoEval < handle
                     fp=cumsum(false_positive(t,:)); 
                     num_tp=length(tp);
                     % np = number of gt not ignored. rc = recall array at
-                    % each score cutoff
                     rc=tp/gt_not_ignored; 
-                    pr=tp./(fp+tp); 
+                    pr=tp./(fp+tp); % each score cutoff
+                    
                     q=zeros(1,R); % R = length(recThresholds) = 101; recThresholds = [0:.01:1]; 
                     recall_thresholds=parameters.recThresholds;
                     if(num_tp==0 || tp(num_tp)==0)
@@ -642,7 +642,7 @@ classdef CocoEval < handle
     end
     
     methods( Static )
-        function e = evaluateImg( gt, dt, params )
+        function e = evaluateImg( gt, detection, params )
             % Run evaluation for a single image and category.
             parameters=params; 
             numIouThresholds=length(parameters.iouThresholds); 
@@ -650,41 +650,41 @@ classdef CocoEval < handle
             area=[gt.area]; 
             gtIgnore=[gt.iscrowd]|[gt.ignore]|area<areaRange(1)|area>areaRange(2);
             numGroundTruth=length(gt); 
-            numDetection=length(dt); 
+            numDetection=length(detection); 
             for gt_idx=1:numGroundTruth
                 gt(gt_idx).ignore=gtIgnore(gt_idx); 
             end
             % sort dt highest score first, sort gt ignore last
             [~,o]=sort([gt.ignore],'ascend'); 
             gt=gt(o);
-            [~,o]=sort([dt.score],'descend'); 
-            dt=dt(o);
+            [~,o]=sort([detection.score],'descend'); 
+            detection=detection(o);
             if(numDetection>parameters.maxDetections)
                 numDetection=parameters.maxDetections; 
-                dt=dt(1:numDetection); 
+                detection=detection(1:numDetection); 
             end
             % compute iou between each dt and gt region
             iscrowd = uint8([gt.iscrowd]);
             threshold_idx=find(strcmp(parameters.iouType,{'segm','bbox','keypoints'}));
             if(threshold_idx==1)
                 gt_idx=[gt.segmentation]; 
-                dt_idx=[dt.segmentation]; 
+                dt_idx=[detection.segmentation]; 
             elseif(threshold_idx==2)
                 gt_idx=cat(1,gt.bbox); 
-                dt_idx=cat(1,dt.bbox); 
+                dt_idx=cat(1,detection.bbox); 
             end
             
             if(threshold_idx<=2)
                 ious=MaskApi.iou(dt_idx,gt_idx,iscrowd); 
             else
-                ious=CocoEval.oks(gt,dt); 
+                ious=CocoEval.oks(gt,detection); 
             end
             % attempt to match each (sorted) dt to each (sorted) gt
             gt_matches=zeros(numIouThresholds,numGroundTruth); 
             gtIds=[gt.id]; 
             gtIgnore=[gt.ignore];
             dt_matches=zeros(numIouThresholds,numDetection); 
-            dtIds=[dt.id]; 
+            dtIds=[detection.id]; 
             dtIgnore=zeros(numIouThresholds,numDetection);
             for threshold_idx=1:numIouThresholds
                 for dt_idx=1:numDetection
@@ -716,16 +716,16 @@ classdef CocoEval < handle
                 end
             end
             % set unmatched detections outside of area range to ignore
-            if(isempty(dt))
+            if(isempty(detection))
                 area=zeros(1,0); 
             else
-                area=[dt.area]; 
+                area=[detection.area]; 
             end
             dtIgnore = dtIgnore | (dt_matches==0 & repmat(area<areaRange(1)|area>areaRange(2),numIouThresholds,1));
             % store results for given image and category
             dtImgIds=ones(1,numDetection)*parameters.imgIds; 
             gtImgIds=ones(1,numGroundTruth)*parameters.imgIds;
-            e = {dtIds,gtIds,dtImgIds,gtImgIds,dt_matches,gt_matches,[dt.score],dtIgnore,gtIgnore};
+            e = {dtIds,gtIds,dtImgIds,gtImgIds,dt_matches,gt_matches,[detection.score],dtIgnore,gtIgnore};
         end
         
         function o = oks( gt, dt )
